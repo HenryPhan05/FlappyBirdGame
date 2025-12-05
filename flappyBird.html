@@ -1,0 +1,636 @@
+<!doctype html>
+
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Flappy Bird - Single File (HTML/CSS/JS)</title>
+  <style>
+    /* ======= CSS Cấu hình & kiểu dáng tối giản ======= */
+    :root{
+      --bg:#70c5ce;
+      --ground:#ded895;
+      --pipe:#2ea34a;
+      --accent:#ffdd57;
+      --panel-bg: rgba(255,255,255,0.9);
+      --text: #222;
+      --shadow: rgba(0,0,0,0.12);
+      --font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+
+
+html,body{
+  height:100%;
+  margin:0;
+  background: linear-gradient(#9be0e6, var(--bg));
+  font-family: var(--font-family);
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+}
+
+/* Center container */
+.wrap{
+  min-height:100%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:24px;
+  box-sizing:border-box;
+}
+
+/* Card around canvas */
+.card{
+  background:var(--panel-bg);
+  border-radius:12px;
+  box-shadow: 0 6px 20px var(--shadow);
+  padding:16px;
+  max-width:420px;
+  width:100%;
+  box-sizing:border-box;
+}
+
+/* Canvas responsive */
+#gameCanvas{
+  width:100%;
+  display:block;
+  border-radius:8px;
+  background: linear-gradient(#9be0e6, #70c5ce);
+  touch-action: none; /* avoid accidental browser gestures on mobile */
+}
+
+/* HUD and overlays */
+.hud{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-top:8px;
+  color:var(--text);
+  font-weight:600;
+  font-size:16px;
+}
+
+.panel{
+  text-align:center;
+  padding:10px 14px;
+  border-radius:8px;
+  background:rgba(255,255,255,0.8);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+
+.overlay{
+  position:absolute;
+  left:50%;
+  top:50%;
+  transform:translate(-50%,-50%);
+  min-width:260px;
+  padding:18px;
+  border-radius:10px;
+  background:var(--panel-bg);
+  box-shadow:0 8px 30px rgba(0,0,0,0.15);
+}
+
+.overlay h1{
+  margin:0 0 8px 0;
+  font-size:20px;
+}
+.overlay p{
+  margin:8px 0 12px 0;
+  color:#444;
+  font-size:14px;
+}
+
+.btn{
+  display:inline-block;
+  padding:8px 14px;
+  border-radius:8px;
+  background:var(--accent);
+  color:#222;
+  font-weight:700;
+  cursor:pointer;
+  text-decoration:none;
+  border:none;
+}
+
+.muted{ color:#666; font-weight:500; font-size:13px; }
+
+/* Small-screen tweaks */
+@media (max-width:360px){
+  .card{ padding:10px; border-radius:8px; }
+  .overlay{ min-width:220px; padding:14px; }
+}
+
+
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card" style="position:relative;">
+      <!-- Canvas: chúng ta sẽ vẽ game ở đây -->
+      <canvas id="gameCanvas" width="480" height="640" aria-label="Flappy Bird game"></canvas>
+
+```
+  <!-- Start overlay (hiện lúc bắt đầu) -->
+  <div id="startOverlay" class="overlay" style="display:none;">
+    <h1>Flappy Bird</h1>
+    <p>Nhấn <strong>Space</strong>, chạm màn hình hoặc nhấp để bay. Tránh ống và đừng chạm đất.</p>
+    <button id="startBtn" class="btn">Bắt đầu</button>
+    <p class="muted" style="margin-top:8px">Điểm cao: <span id="bestStart">0</span></p>
+  </div>
+
+  <!-- Game over overlay -->
+  <div id="gameOverOverlay" class="overlay" style="display:none;">
+    <h1>Game Over</h1>
+    <p>Bạn được: <strong id="scoreFinal">0</strong></p>
+    <p class="muted">Điểm cao: <strong id="bestFinal">0</strong></p>
+    <div style="margin-top:10px">
+      <button id="retryBtn" class="btn">Chơi lại</button>
+    </div>
+  </div>
+
+  <!-- HUD dưới canvas -->
+  <div style="margin-top:10px">
+    <div class="hud">
+      <div class="panel">Score: <span id="score">0</span></div>
+      <div class="panel">Best: <span id="best">0</span></div>
+    </div>
+  </div>
+</div>
+```
+
+  </div>
+
+  <script>
+  'use strict';
+  /**
+   * Flappy Bird (single-file)
+   * - Canvas based
+   * - Gravity, jump on click/space/touch
+   * - Pipes spawn with random heights and fixed gap
+   * - Collision detection: circle (bird) vs rect (pipes), and ground/ceiling
+   * - Score + high score saved in localStorage
+   * - Start and Game Over overlays
+   *
+   * File includes comments separating:
+   * - CONFIG (constants)
+   * - State
+   * - Input handling
+   * - Game loop (update + render)
+   * - Collision detection
+   * - Utility functions
+   */
+
+  /* =========================
+     ====== CONFIG ==========
+     ========================= */
+  const CONFIG = {
+    // logical resolution: draw calculations in a virtual coordinate space, then scale to canvas
+    VIRTUAL_WIDTH: 480,
+    VIRTUAL_HEIGHT: 640,
+
+    // Bird physics
+    BIRD_RADIUS: 16,            // bird visual radius (logical units)
+    GRAVITY: 1100,              // pixels per second^2
+    JUMP_VELOCITY: -360,        // instantaneous velocity on flap (px/s)
+
+    // Pipes
+    PIPE_WIDTH: 64,
+    PIPE_SPEED: 180,            // px/s (move left)
+    PIPE_GAP: 160,              // vertical gap between top and bottom pipe (logical units)
+    PIPE_INTERVAL: 1400,        // ms between pipe spawns
+
+    // Ground / ceiling
+    GROUND_HEIGHT: 80,
+
+    // Scoring
+    SCORE_PER_PASS: 1,
+
+    // localStorage key
+    LS_KEY: 'flappy_highscore_v1',
+
+    // Visual tuning
+    BACKGROUND_COLOR_TOP: '#9be0e6',
+    BACKGROUND_COLOR_BOTTOM: '#70c5ce',
+  };
+
+  /* =========================
+     ====== GLOBAL STATE =====
+     ========================= */
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Overlays & HUD
+  const startOverlay = document.getElementById('startOverlay');
+  const gameOverOverlay = document.getElementById('gameOverOverlay');
+  const startBtn = document.getElementById('startBtn');
+  const retryBtn = document.getElementById('retryBtn');
+  const scoreEl = document.getElementById('score');
+  const bestEl = document.getElementById('best');
+  const scoreFinalEl = document.getElementById('scoreFinal');
+  const bestFinalEl = document.getElementById('bestFinal');
+  const bestStartEl = document.getElementById('bestStart');
+
+  let devicePixelRatioBacking = 1; // used for high-DPI scaling
+
+  // Game runtime state
+  let state = {
+    running: false,      // true while in gameplay
+    started: false,      // true after pressed start
+    lastTime: 0,
+    dt: 0,
+    accumulator: 0,
+    score: 0,
+    best: 0,
+  };
+
+  // Bird object (as circle)
+  let bird = {
+    x: CONFIG.VIRTUAL_WIDTH * 0.28,
+    y: CONFIG.VIRTUAL_HEIGHT * 0.5,
+    vy: 0,
+    radius: CONFIG.BIRD_RADIUS,
+    rotation: 0, // for visual tilt
+  };
+
+  // Pipes array: each pipe pair is {x, topHeight} where topHeight is height of top pipe (from y=0)
+  let pipes = [];
+
+  // Pipe spawn timer
+  let pipeTimer = 0;
+
+  /* =========================
+     ====== INITIALIZE =======
+     ========================= */
+
+  // Resize canvas to be responsive and handle devicePixelRatio
+  function resizeCanvas() {
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    devicePixelRatioBacking = dpr;
+
+    // maintain aspect ratio based on VIRTUAL_WIDTH / VIRTUAL_HEIGHT
+    const desiredWidth = rect.width;
+    const desiredHeight = Math.round(desiredWidth * (CONFIG.VIRTUAL_HEIGHT / CONFIG.VIRTUAL_WIDTH));
+
+    canvas.style.width = desiredWidth + 'px';
+    canvas.style.height = desiredHeight + 'px';
+
+    canvas.width = Math.round(desiredWidth * dpr);
+    canvas.height = Math.round(desiredHeight * dpr);
+
+    // scale the drawing coordinate system to match virtual units
+    ctx.setTransform(canvas.width / CONFIG.VIRTUAL_WIDTH, 0, 0, canvas.height / CONFIG.VIRTUAL_HEIGHT, 0, 0);
+  }
+
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
+
+  // Load best score from localStorage
+  function loadBest() {
+    const val = parseInt(localStorage.getItem(CONFIG.LS_KEY) || '0', 10);
+    state.best = isFinite(val) ? val : 0;
+    bestEl.textContent = state.best;
+    bestStartEl.textContent = state.best;
+  }
+  loadBest();
+
+  /* =========================
+     ====== INPUT HANDLING ===
+     ========================= */
+
+  // Generic "flap" action
+  function flap() {
+    if (!state.started) {
+      // first flap effectively starts the game (alternative to pressing start)
+      startGame();
+    }
+    // Give upward velocity
+    bird.vy = CONFIG.JUMP_VELOCITY;
+    // optional: small rotation backward
+    bird.rotation = -0.5;
+  }
+
+  // Click / tap on canvas
+  canvas.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    flap();
+  });
+
+  // Touch
+  canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    flap();
+  }, {passive:false});
+
+  // Keyboard (Space)
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'Space') {
+      e.preventDefault();
+      flap();
+    }
+  });
+
+  // Buttons
+  startBtn.addEventListener('click', startGame);
+  retryBtn.addEventListener('click', resetAndStart);
+
+  /* =========================
+     ====== GAME CONTROL =====
+     ========================= */
+
+  function resetState() {
+    // Reset all runtime values
+    state.score = 0;
+    scoreEl.textContent = state.score;
+    bird.x = CONFIG.VIRTUAL_WIDTH * 0.28;
+    bird.y = CONFIG.VIRTUAL_HEIGHT * 0.5;
+    bird.vy = 0;
+    bird.rotation = 0;
+    pipes = [];
+    pipeTimer = 0;
+    state.lastTime = performance.now();
+  }
+
+  function startGame() {
+    // Hide overlays, mark started and running
+    startOverlay.style.display = 'none';
+    gameOverOverlay.style.display = 'none';
+    state.started = true;
+    state.running = true;
+    resetState();
+    requestAnimationFrame(loop);
+  }
+
+  function resetAndStart() {
+    state.started = true;
+    state.running = true;
+    gameOverOverlay.style.display = 'none';
+    resetState();
+    requestAnimationFrame(loop);
+  }
+
+  function endGame() {
+    state.running = false;
+    // update best
+    if (state.score > state.best) {
+      state.best = state.score;
+      localStorage.setItem(CONFIG.LS_KEY, String(state.best));
+    }
+    // show overlay with results
+    scoreFinalEl.textContent = state.score;
+    bestFinalEl.textContent = state.best;
+    bestEl.textContent = state.best;
+    startOverlay.style.display = 'none';
+    gameOverOverlay.style.display = 'block';
+  }
+
+  // Show start overlay initially
+  function showStartOverlay() {
+    startOverlay.style.display = 'block';
+    gameOverOverlay.style.display = 'none';
+    state.started = false;
+    state.running = false;
+  }
+  showStartOverlay();
+
+  /* =========================
+     ====== PIPE MANAGEMENT ==
+     ========================= */
+
+  function spawnPipe() {
+    // choose a top pipe height that leaves a fixed vertical gap
+    const minTop = 40; // min top pipe height
+    const maxTop = CONFIG.VIRTUAL_HEIGHT - CONFIG.GROUND_HEIGHT - CONFIG.PIPE_GAP - 40;
+    const topHeight = minTop + Math.random() * (Math.max(0, maxTop - minTop));
+    const x = CONFIG.VIRTUAL_WIDTH + CONFIG.PIPE_WIDTH; // spawn off-screen right
+    pipes.push({ x: x, top: topHeight });
+  }
+
+  /* =========================
+     ====== COLLISION =========
+     ========================= */
+
+  // Circle (bird) vs Rect (pipe) collision
+  function circleRectCollision(cx, cy, r, rx, ry, rw, rh) {
+    // find closest point on rect to circle center
+    const closestX = Math.max(rx, Math.min(cx, rx + rw));
+    const closestY = Math.max(ry, Math.min(cy, ry + rh));
+    const dx = cx - closestX;
+    const dy = cy - closestY;
+    return (dx * dx + dy * dy) <= (r * r);
+  }
+
+  function checkCollisions() {
+    // ground and ceiling
+    if (bird.y - bird.radius <= 0) {
+      return true;
+    }
+    if (bird.y + bird.radius >= CONFIG.VIRTUAL_HEIGHT - CONFIG.GROUND_HEIGHT) {
+      return true;
+    }
+
+    // pipes
+    for (let i = 0; i < pipes.length; i++) {
+      const p = pipes[i];
+      const pipeX = p.x;
+      const topH = p.top;
+      const pipeW = CONFIG.PIPE_WIDTH;
+      const gap = CONFIG.PIPE_GAP;
+
+      // top pipe rect: x, y=0, width, height=topH
+      if (circleRectCollision(bird.x, bird.y, bird.radius, pipeX, 0, pipeW, topH)) {
+        return true;
+      }
+      // bottom pipe rect: x, y=topH+gap, width, height
+      if (circleRectCollision(bird.x, bird.y, bird.radius, pipeX, topH + gap, pipeW, CONFIG.VIRTUAL_HEIGHT - (topH + gap) - CONFIG.GROUND_HEIGHT)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /* =========================
+     ====== GAME LOOP =========
+     ========================= */
+
+  // Main loop (requestAnimationFrame)
+  function loop(timestamp) {
+    if (!state.running) return; // stop animation on game over
+
+    // calculate delta time
+    const last = state.lastTime || timestamp;
+    const dtMs = Math.min(50, timestamp - last); // clamp dt to avoid big jumps after tab switch
+    state.lastTime = timestamp;
+    const dt = dtMs / 1000; // seconds
+
+    update(dt);
+    render();
+
+    if (state.running) {
+      requestAnimationFrame(loop);
+    }
+  }
+
+  /* ===== UPDATE: physics, spawning, scoring ===== */
+  function update(dt) {
+    // bird physics
+    bird.vy += CONFIG.GRAVITY * dt;
+    bird.y += bird.vy * dt;
+
+    // tilt bird gradually based on vy (for visuals)
+    const maxTilt = 0.9;
+    bird.rotation = Math.max(-0.7, Math.min(maxTilt, bird.vy / 800));
+
+    // pipes movement
+    for (let i = pipes.length - 1; i >= 0; i--) {
+      pipes[i].x -= CONFIG.PIPE_SPEED * dt;
+      // scoring: if pipe just passed bird's x + radius and has not been counted, increase score
+      // We'll count when pipe.x + PIPE_WIDTH < bird.x and we haven't counted it before,
+      // So add a 'scored' flag
+      if (!pipes[i].scored && (pipes[i].x + CONFIG.PIPE_WIDTH) < bird.x) {
+        state.score += CONFIG.SCORE_PER_PASS;
+        pipes[i].scored = true;
+        scoreEl.textContent = state.score;
+      }
+      // remove offscreen pipes
+      if (pipes[i].x + CONFIG.PIPE_WIDTH < -50) {
+        pipes.splice(i, 1);
+      }
+    }
+
+    // spawn logic
+    pipeTimer += dt * 1000;
+    if (pipeTimer >= CONFIG.PIPE_INTERVAL) {
+      pipeTimer = 0;
+      spawnPipe();
+    }
+
+    // check collisions
+    if (checkCollisions()) {
+      endGame();
+    }
+  }
+
+  /* ===== RENDER: draw background, pipes, bird, ground, HUD ===== */
+  function render() {
+    const W = CONFIG.VIRTUAL_WIDTH;
+    const H = CONFIG.VIRTUAL_HEIGHT;
+
+    // clear
+    ctx.clearRect(0, 0, W, H);
+
+    // background gradient
+    // simple fill: top-to-bottom
+    ctx.fillStyle = CONFIG.BACKGROUND_COLOR_TOP;
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw pipes
+    for (let i = 0; i < pipes.length; i++) {
+      const p = pipes[i];
+      const x = p.x;
+      const topH = p.top;
+      const pipeW = CONFIG.PIPE_WIDTH;
+      const gap = CONFIG.PIPE_GAP;
+
+      // top pipe
+      ctx.fillStyle = '#2ea34a';
+      roundRect(ctx, x, 0, pipeW, topH, 6);
+      ctx.fill();
+
+      // bottom pipe
+      const bottomY = topH + gap;
+      const bottomH = H - bottomY - CONFIG.GROUND_HEIGHT;
+      roundRect(ctx, x, bottomY, pipeW, bottomH, 6);
+      ctx.fill();
+    }
+
+    // draw ground
+    ctx.fillStyle = CONFIG.GROUND_HEIGHT ? '#d8c892' : '#cbb'; // ground color
+    ctx.fillRect(0, H - CONFIG.GROUND_HEIGHT, W, CONFIG.GROUND_HEIGHT);
+
+    // bird (circle) with simple wing
+    ctx.save();
+    ctx.translate(bird.x, bird.y);
+    ctx.rotate(bird.rotation);
+
+    // body
+    ctx.beginPath();
+    ctx.fillStyle = '#ffdd57';
+    ctx.arc(0, 0, bird.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.closePath();
+
+    // eye
+    ctx.beginPath();
+    ctx.fillStyle = '#222';
+    ctx.arc(bird.radius * 0.35, -bird.radius * 0.25, bird.radius * 0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.closePath();
+
+    // wing (simple arc)
+    ctx.beginPath();
+    ctx.fillStyle = '#ffca2a';
+    ctx.ellipse(-bird.radius * 0.2, 0, bird.radius * 0.6, bird.radius * 0.35, Math.PI / 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.closePath();
+
+    ctx.restore();
+
+    // HUD drawn via DOM; but we can draw optional score big in center when playing
+    if (state.running) {
+      // large score at top center
+      ctx.fillStyle = "#fff";
+      ctx.font = "42px " + getComputedStyle(document.body).fontFamily;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = "rgba(0,0,0,0.25)";
+      ctx.strokeText(String(state.score), W / 2, 16);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(String(state.score), W / 2, 16);
+    }
+  }
+
+  /* =========================
+     ======== UTILITIES ======
+     ========================= */
+
+  // draw rounded rectangle path
+  function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  // Ensure start overlay fits center
+  function positionOverlays() {
+    // overlays are positioned absolute relative to .card; they already use left:50% top:50% transform
+    // nothing else needed here but keep function for future extension
+  }
+
+  // Start by showing start overlay and setting best score
+  function boot() {
+    loadBest();
+    positionOverlays();
+    // center overlays (they are absolute already)
+    startOverlay.style.display = 'block';
+    gameOverOverlay.style.display = 'none';
+    // draw an initial frame so canvas isn't blank
+    render();
+  }
+
+  boot();
+
+  // Expose a simple debug function on window if needed
+  window._flappy_debug = {
+    state, bird, pipes, CONFIG,
+  };
+
+  </script>
+
+</body>
+</html>
